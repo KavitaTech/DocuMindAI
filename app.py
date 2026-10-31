@@ -1,4 +1,5 @@
 import hashlib
+import os
 import sqlite3
 from datetime import datetime
 from pathlib import Path
@@ -279,32 +280,100 @@ def retrieve(question, selected_ids, top_k, max_distance):
     return matches
 
 
-def ask_ollama(question, matches, model_name):
-    context = build_context(matches)
+def get_setting(name, default=""):
+    """Read deployment settings without putting credentials in source code."""
+    value = os.environ.get(name)
+    if value:
+        return value
+    try:
+        return st.secrets.get(name, default) or default
+    except (FileNotFoundError, KeyError):
+        return default
 
+
+def ask_groq(question, matches, model_name):
+    api_key = str(get_setting("GROQ_API_KEY")).strip()
+    if not api_key:
+        raise ValueError(
+            "Groq API key is missing. Add GROQ_API_KEY to the app's "
+            "Streamlit Secrets settings."
+        )
+
+    context = build_context(matches)
     user_message = (
         f"DOCUMENT EXCERPTS:\n{context}\n\n"
         f"QUESTION:\n{question}\n\n"
         "Answer only from the excerpts and include source citations."
     )
 
+    payload = {
+        "model": model_name,
+        "stream": False,
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": user_message}
+        ],
+        "temperature": 0.1,
+        "max_completion_tokens": 2048
+    }
+    if model_name.startswith("openai/gpt-oss-"):
+        payload["reasoning_effort"] = "low"
+
     response = requests.post(
-        "http://localhost:11434/api/chat",
-        json={
-            "model": model_name,
-            "stream": False,
-            "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_message}
-            ],
-            "options": {"temperature": 0.1}
+        "https://api.groq.com/openai/v1/chat/completions",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
         },
-        timeout=180
+        json=payload,
+        timeout=(10, 120)
     )
-
     response.raise_for_status()
-    return response.json()["message"]["content"]
 
+    try:
+        answer = response.json()["choices"][0]["message"]["content"]
+    except (ValueError, KeyError, IndexError, TypeError) as error:
+        raise ValueError("Groq returned an unexpected response. Please try again.") from error
+
+    if not isinstance(answer, str) or not answer.strip():
+        raise ValueError(
+            "Groq returned no answer text. Try a shorter question or try again."
+        )
+    return answer.strip()
+
+
+def groq_request_error(error):
+    """Return an actionable message without exposing request credentials."""
+    if isinstance(error, requests.Timeout):
+        return "The model request timed out. Please try again."
+
+    response = getattr(error, "response", None)
+    status = response.status_code if response is not None else None
+    if status == 401:
+        return (
+            "Groq rejected the API key. Check GROQ_API_KEY in Streamlit Secrets "
+            "and confirm that the key is active."
+        )
+    if status == 403:
+        return "Groq denied access. Check your account and model permissions."
+    if status == 404:
+        return (
+            "The configured Groq model is unavailable. Set GROQ_MODEL to a "
+            "model supported by your Groq account."
+        )
+    if status == 429:
+        return (
+            "Groq's request or token limit was reached. Wait before trying "
+            "again, or check your account's usage limits."
+        )
+    if status in (400, 413):
+        return (
+            "Groq could not accept this request. Try fewer selected documents "
+            "or check the configured model and its input limits."
+        )
+    if status is not None:
+        return f"The model service returned HTTP {status}. Please try again later."
+    return "Could not reach Groq. Please try again in a moment."
 
 
 # ============================================================
@@ -312,7 +381,7 @@ def ask_ollama(question, matches, model_name):
 # ============================================================
 
 # Internal RAG settings — not displayed to users
-model_name = "qwen2.5:3b"
+model_name = str(get_setting("GROQ_MODEL", "openai/gpt-oss-20b")).strip()
 top_k = 5
 max_distance = 0.85
 
@@ -587,8 +656,8 @@ elif page == "💬 AI Assistant":
 
                             else:
 
-                                # Generate answer using Ollama
-                                answer = ask_ollama(
+                                # Generate answer using the hosted Groq API
+                                answer = ask_groq(
                                     question,
                                     matches,
                                     model_name
@@ -596,12 +665,7 @@ elif page == "💬 AI Assistant":
 
                         except requests.RequestException as error:
 
-                            answer = (
-                                "Could not connect to Ollama. "
-                                "Make sure Ollama is running and "
-                                "the Qwen model is installed.\n\n"
-                                f"Details: {error}"
-                            )
+                            answer = groq_request_error(error)
 
                             matches = []
 
