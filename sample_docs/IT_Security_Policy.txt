@@ -1,0 +1,14 @@
+NORTHSTAR TECHNOLOGIES - IT SECURITY POLICY
+Synthetic demonstration document.
+
+Incident Reporting
+Employees must report suspected information security incidents
+within one hour of discovering the incident.
+
+Authentication
+Multi-factor authentication is mandatory for company accounts
+that support it.
+
+Access Control
+Employees receive access only to systems necessary for their job.
+Access is removed when employment ends.

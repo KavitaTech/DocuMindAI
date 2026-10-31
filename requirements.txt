@@ -1,0 +1,5 @@
+streamlit>=1.37
+chromadb>=0.5
+sentence-transformers>=3.0
+PyMuPDF>=1.24
+requests>=2.32

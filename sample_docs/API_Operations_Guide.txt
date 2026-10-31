@@ -1,0 +1,16 @@
+NORTHSTAR TECHNOLOGIES - API OPERATIONS GUIDE
+Synthetic demonstration document.
+
+API Rate Limits
+The public API permits 120 requests per minute per client
+application. Requests exceeding the limit receive HTTP 429.
+
+Webhook Processing
+Each webhook event includes a unique event ID.
+Consumers should verify the webhook signature and process
+each event ID only once.
+
+Retries
+Temporary server errors may be retried using exponential
+backoff. Clients should use idempotency keys for operations
+that must not be repeated.
